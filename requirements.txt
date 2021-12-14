@@ -1,0 +1,15 @@
+click==8.0.3
+dataclasses==0.8
+Flask==2.0.2
+Flask-Admin==1.5.8
+Flask-SQLAlchemy==2.5.1
+greenlet==1.1.2
+importlib-metadata==4.8.2
+itsdangerous==2.0.1
+Jinja2==3.0.3
+MarkupSafe==2.0.1
+SQLAlchemy==1.4.28
+typing-extensions==4.0.1
+Werkzeug==2.0.2
+WTForms==3.0.0
+zipp==3.6.0

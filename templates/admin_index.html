@@ -1,0 +1,16 @@
+{% extends 'admin/master.html' %}
+{% block body %}
+<div class="jumbotron">
+    <h1 class="display-4">Welcome back!</h1>
+    <br><br>
+    <p>
+        <span class="badge badge-pill badge-primary">{{public_count}}</span> questions shared to everyone,
+        <span class="badge badge-pill badge-dark">{{private_count}}</span> remained be the secret.</p>
+    <hr class="my-4">
+    <p>Now <span class="badge badge-pill badge-light">{{empty_count}}</span> questions to be answered.</p>
+    <br>
+    <div align="right">
+        <a class="btn btn-dark btn-lg" role="button" href="/admin/to_answer">Go answer</a>
+    </div>
+</div>
+{% endblock %}

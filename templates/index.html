@@ -1,0 +1,86 @@
+<html>
+<head>
+    <title>AnoMe</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link href="https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/4.6.0/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/4.6.0/js/bootstrap.min.js"></script>
+</head>
+<body>
+<div class="container">
+    <br>
+    <div class="row" align="center">
+        <p class="col-12 text-white" style="background:#A0AACC">
+            <b class="text-warning">Ano</b>ther <b class="text-warning">Me</b> here, wait for your asking.
+        </p>
+    </div>
+    <div class="row justify-content-center align-items-center">
+        <a href="/" class="navbar-brand" style="color:#6667AB"><h1><b>AnoMe</b></h1></a>
+    </div>
+    <div class="row justify-content-center align-items-center">
+        <div align="center">
+            <x class="col-2"></x>
+            <a class="col-3" style="color:#7778BC" href="/secret"><b>FIND&nbsp;&nbsp;SECRET</b></a>
+            <x class="col-2">|</x>
+            <a class="col-3" style="color:#7778BC" href="/admin"><b>ANSWER(admin)</b></a>
+            <x class="col-2"></x>
+        </div>
+    </div>
+    <br>
+    <hr>
+    <br>
+    <div class="row justify-content-center align-items-center">
+        <form class="col-md-12 col-lg-8" action="/question" method="post">
+            {% if secret_code %}
+            <div class="alert alert-secondary alert-dismissible fade show" role="alert" style="background:#A0AACC;color:white">
+                Keep your secret code: <code><b>{{ secret_code }}</b></code><br>
+                When your question is answered but set to private, use the code to view answer.
+                <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            {% else %}
+            {% if question_error %}
+            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                {{ question_error }}
+                <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            {% endif %}
+            <div class="form-group">
+                <textarea class="form-control" rows="3" name="question"
+                          placeholder="Ask me something here ..."></textarea>
+            </div>
+            <div align="center">
+                <button type="submit" class="btn btn-outline-dark btn-block">Submit</button>
+            </div>
+            {% endif %}
+        </form>
+    </div>
+    <div class="row justify-content-center align-items-center">
+        <div class="col-lg-12" align="center">
+            <br>
+            <h2 style="color:#6667AB">Public Q&A <span class="badge badge-pill badge-secondary" style="background:#A0AACC">{{data|length}}</span></h2>
+            <br>
+        </div>
+        {% if data %}
+        {% for i in data %}
+        <div class="col-xs-12 col-md-6 col-lg-4">
+            <div class="card bg-dark">
+                <div class="card-header" align="center" style="background:#D7DDEE">
+                    <h5 class="card-title">{{i.question}}</h5>
+                </div>
+                <div class="card-body" style="background:#FFF">
+                    <p class="card-text">{{i.answer}}</p>
+                </div>
+            </div>
+            <br>
+        </div>
+        {% endfor %}
+        {% else %}
+        <h5 class="text-muted"><i>No answered question now ...</i></h5>
+        {% endif %}
+    </div>
+</div>
+</body>
+</html>
