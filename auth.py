@@ -24,7 +24,7 @@ class AnoMeAdminIndexView(AdminIndexView):
         return session.get("admin", "") == session_secret["admin"]
 
     def inaccessible_callback(self, name, **kwargs):
-        return redirect(url_for("login", next=request.url))
+        return redirect(url_for("login", next=request.full_path))
 
 
 class AnoMeAllQaView(ModelView):
@@ -32,7 +32,7 @@ class AnoMeAllQaView(ModelView):
         return session.get("admin", "") == session_secret["admin"]
 
     def inaccessible_callback(self, name, **kwargs):
-        return redirect(url_for("login", next=request.url))
+        return redirect(url_for("login", next=request.full_path))
 
 
 class AnoMeEmptyQaView(AnoMeAllQaView):

@@ -63,7 +63,7 @@ def question():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "GET":
-        login_url = request.url
+        login_url = request.full_path
         return render_template("login.html", login_url=login_url)
     if request.method == "POST":
         password = request.form.get("password", None)
