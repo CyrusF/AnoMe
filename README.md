@@ -6,7 +6,7 @@ I need a anonymous question box with some 'private answer' function, and I do no
 
 ## How to
 1. Install requirement with `pip3 install -r requirements.txt` or any package manager you like.
-2. Run `python3 setup.py`, enter your admin password, then hash of your password will automatically recorded.
+2. Run `python3 config.py`, enter your admin password, then hash of your password will automatically recorded.
 3. Run `python3 main.py`, it works.
 4. Application can be accessed by http://127.0.0.1:5000.
 
