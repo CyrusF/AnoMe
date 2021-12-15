@@ -16,6 +16,4 @@ I need a anonymous question box with some 'private answer' function, and I do no
 3. Have fun!
 
 ## Screenshots
-<img width="1394" alt="image" src="https://user-images.githubusercontent.com/20309761/145978565-78030480-9da9-4afa-96a3-73b4b74aceab.png">
-<img width="1394" alt="image" src="https://user-images.githubusercontent.com/20309761/145978813-973aff9d-2d3f-489c-9921-da3b16ba8edd.png">
-<img width="1394" alt="image" src="https://user-images.githubusercontent.com/20309761/145978915-858ac8f6-1886-4468-a16c-0b1e5065cb8e.png">
+<img width="1920" src="https://user-images.githubusercontent.com/20309761/146222654-6db42aa1-c20a-4e39-9abf-b25d880372b9.png">
