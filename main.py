@@ -97,10 +97,13 @@ def show_secret():
         timestamp_str = data[0].answer_timestamp.strftime("%Y-%m-%d %H:%M:%S")
     else:
         timestamp_str = ""
+    is_public = data[0].is_public
+    is_public = {True: "Published", False: "Private"}.get(is_public)
     return render_template("secret.html",
                            question=question,
                            secret=secret[:4] + "****" + secret[-4:],
                            answer=answer,
+                           is_public=is_public,
                            timestamp_str=timestamp_str)
 
 
