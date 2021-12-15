@@ -91,14 +91,15 @@ def show_secret():
     if len(data) == 0:
         return render_template("secret.html", secret_error="Oops, secret not found.", question="")
     question = data[0].question
+    is_public = data[0].is_public
+    is_public = {True: "Published", False: "Private"}.get(is_public)
     answer = data[0].answer
+    is_public = "To be answered" if answer is None else is_public
     answer = "" if answer is None else answer
     if data[0].answer_timestamp is not None:
         timestamp_str = data[0].answer_timestamp.strftime("%Y-%m-%d %H:%M:%S")
     else:
         timestamp_str = ""
-    is_public = data[0].is_public
-    is_public = {True: "Published", False: "Private"}.get(is_public)
     return render_template("secret.html",
                            question=question,
                            secret=secret[:4] + "****" + secret[-4:],
