@@ -1,3 +1,5 @@
+import sys
+
 from flask import Flask
 from utils import random_hex_32
 
@@ -37,6 +39,11 @@ from flask import request, render_template, redirect, session
 from config import ADMIN_PASSWORD
 from utils import session_secret, refresh_session_secret
 from hashlib import md5
+from i18n import i18n
+
+lang = "EN-US"
+if len(sys.argv) > 1:
+    lang = sys.argv[1]
 
 
 @app.route("/", methods=["GET"])
@@ -45,7 +52,7 @@ def index():
         .outerjoin(Likes, QA.id == Likes.QA_id).add_entity(Likes) \
         .order_by(Likes.likes.desc(), QA.id.desc()) \
         .all()
-    return render_template("index.html", data=data)
+    return render_template("index.html", data=data, i18n_t=i18n(lang))
 
 
 @app.route("/question", methods=["POST"])
@@ -56,22 +63,22 @@ def question():
         .all()
     question = request.form.get("question", "")
     if not question:
-        return render_template("index.html", question_error="Say something please ... Question should not empty.",
-                               data=data)
+        return render_template("index.html", question_error=i18n(lang, "empty question"),
+                               data=data, i18n_t=i18n(lang))
     secret = random_hex_32()
     if QA.query.filter(QA.answer == None).filter(QA.question == question).count() != 0:
-        return render_template("index.html", question_error="Same question asked ... Just wait for answer.", data=data)
+        return render_template("index.html", question_error=i18n(lang, "same question"), data=data, i18n_t=i18n(lang))
     qa = QA(question=question, secret=secret)
     db.session.add(qa)
     db.session.commit()
-    return render_template("index.html", secret_code=secret, data=data)
+    return render_template("index.html", secret_code=secret, data=data, i18n_t=i18n(lang))
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "GET":
         login_url = request.full_path
-        return render_template("login.html", login_url=login_url)
+        return render_template("login.html", login_url=login_url, i18n_t=i18n(lang))
     if request.method == "POST":
         password = request.form.get("password", None)
         if password is not None and md5(password.encode("utf8")).hexdigest() == ADMIN_PASSWORD:
@@ -79,7 +86,7 @@ def login():
             print("set admin", session_secret["admin"])
             next_url = request.args.get("next", default="/")
             return redirect(next_url)
-        return render_template("login.html", error="Wrong password")
+        return render_template("login.html", error=i18n(lang, "wrong password"), i18n_t=i18n(lang))
 
 
 @app.route("/logout", methods=["GET"])
@@ -121,19 +128,19 @@ def like():
 def show_secret():
     secret = request.args.get("s", default=None)
     if secret is None:
-        return render_template("secret.html", question="")
+        return render_template("secret.html", question="", i18n_t=i18n(lang))
     data = QA.query \
         .filter(QA.secret == secret) \
         .outerjoin(Likes, QA.id == Likes.QA_id) \
         .add_entity(Likes) \
         .all()
     if len(data) == 0:
-        return render_template("secret.html", secret_error="Oops, secret not found.", question="")
+        return render_template("secret.html", secret_error=i18n(lang, "no secret"), question="", i18n_t=i18n(lang))
     question = data[0].QA.question
     is_public = data[0].QA.is_public
-    is_public = {True: "Published", False: "Private"}.get(is_public)
+    is_public = {True: i18n(lang, "published"), False: i18n(lang, "private")}.get(is_public)
     answer = data[0].QA.answer
-    is_public = "To be answered" if answer is None else is_public
+    is_public = i18n(lang, "no answer") if answer is None else is_public
     answer = "" if answer is None else answer
     if data[0].QA.answer_timestamp is not None:
         timestamp_str = data[0].QA.answer_timestamp.strftime("%Y-%m-%d %H:%M:%S")
@@ -151,7 +158,8 @@ def show_secret():
                            is_public=is_public,
                            likes=likes,
                            qa_id=qa_id,
-                           timestamp_str=timestamp_str)
+                           timestamp_str=timestamp_str,
+                           i18n_t=i18n(lang))
 
 
 # Set init db for demo
