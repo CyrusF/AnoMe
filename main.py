@@ -40,13 +40,13 @@ from hashlib import md5
 
 @app.route("/", methods=["GET"])
 def index():
-    data = QA.query.filter(QA.answer != None).filter(QA.is_public == True).all()
+    data = QA.query.filter(QA.answer != None).filter(QA.is_public == True).order_by(QA.id.desc()).all()
     return render_template("index.html", data=data)
 
 
 @app.route("/question", methods=["POST"])
 def question():
-    data = QA.query.filter(QA.answer != None).filter(QA.is_public == True).all()
+    data = QA.query.filter(QA.answer != None).filter(QA.is_public == True).order_by(QA.id.desc()).all()
     question = request.form.get("question", "")
     if not question:
         return render_template("index.html", question_error="Say something please ... Question should not empty.",
@@ -129,4 +129,4 @@ def show_secret():
 #     return index()
 
 
-app.run()
+app.run(host='127.0.0.1', port=5000)
