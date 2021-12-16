@@ -11,7 +11,11 @@
     <div class="row h-100 justify-content-center align-items-center">
         <form class="col-xs-12 col-md-8 col-lg-6" action="{{ login_url }}" method="post">
             <div class="col-12" align="center">
-                <a href="/" class="navbar-brand" style="color:#6667AB"><h1><b>AnoMe</b></h1></a>
+                <a href="/" class="navbar-brand" style="color:#6667AB">
+                    <div style="background:url({{ url_for('static', filename='images/favicon.jpg') }}) no-repeat left center;padding-left:60px;background-size:50px,50px;margin-left:20px">
+                        <h1><b>AnoMe</b></h1>
+                    </div>
+                </a>
                 <br><br>
             </div>
             {% if error %}

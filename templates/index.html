@@ -47,6 +47,8 @@
         }
 
 
+
+
     </style>
     <br>
     <br>
@@ -56,7 +58,11 @@
         </p>
     </div>
     <div class="row justify-content-center align-items-center">
-        <a href="/" class="navbar-brand" style="color:#6667AB"><h1><b>AnoMe</b></h1></a>
+        <a href="/" class="navbar-brand" style="color:#6667AB">
+            <div style="background:url({{ url_for('static', filename='images/favicon.jpg') }}) no-repeat left center;padding-left:60px;background-size:50px,50px;margin-left:20px">
+                <h1><b>AnoMe</b></h1>
+            </div>
+        </a>
     </div>
     <div class="row justify-content-center align-items-center">
         <div align="center">
@@ -104,7 +110,8 @@
         <div class="col-lg-12" align="center">
             <br>
             <h2 style="color:#6667AB">{{i18n_t['public qa']}} <span class="badge badge-pill badge-secondary"
-                                                       style="background:#A0AACC">{{data|length}}</span></h2>
+                                                                    style="background:#A0AACC">{{data|length}}</span>
+            </h2>
             <br>
         </div>
         {% if data %}
@@ -154,6 +161,8 @@
                 }
             }
         }
+
+
     </script>
 </div>
 </body>
