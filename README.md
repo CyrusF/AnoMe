@@ -1,5 +1,7 @@
-# AnoMe
-Just a tiny anonymous question box
+<p align="center"><a href="https://excited.cloud" target="_blank" rel="noopener noreferrer"><img width="100" src="https://github.com/CyrusF/AnoMe/blob/main/static/images/favicon.jpg" alt="AnoMe logo"></a></p>
+<h1 align="center">AnoMe</h1>
+
+<p align="center">Just a tiny anonymous question box.</p>
 
 ## Why
 I need a anonymous question box with some 'private answer' function, and I do not trust the box run by the porviders.
