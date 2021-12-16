@@ -2,7 +2,7 @@ from flask_admin.contrib.sqla.view import ModelView, func
 from flask_admin import AdminIndexView, expose
 from flask import redirect, url_for, request, session
 from utils import session_secret
-from models import QA
+from models import QA, Likes
 
 
 class AnoMeAdminIndexView(AdminIndexView):
@@ -27,7 +27,7 @@ class AnoMeAdminIndexView(AdminIndexView):
         return redirect(url_for("login", next=request.full_path))
 
 
-class AnoMeAllQaView(ModelView):
+class AnoMeView(ModelView):
     def is_accessible(self):
         return session.get("admin", "") == session_secret["admin"]
 
@@ -35,25 +35,31 @@ class AnoMeAllQaView(ModelView):
         return redirect(url_for("login", next=request.full_path))
 
 
+class AnoMeAllQaView(AnoMeView):
+    pass
+
+
 class AnoMeEmptyQaView(AnoMeAllQaView):
     def get_query(self):
-        return self.session.query(self.model).filter(self.model.answer==None)
+        return self.session.query(self.model).filter(self.model.answer == None)
 
     def get_count_query(self):
-        return self.session.query(func.count("*")).filter(self.model.answer==None)
+        return self.session.query(func.count("*")).filter(self.model.answer == None)
+
 
 class AnoMePublicQaView(AnoMeAllQaView):
     def get_query(self):
-        return self.session.query(self.model).filter(self.model.answer!=None).filter(self.model.is_public==True)
+        return self.session.query(self.model).filter(self.model.answer != None).filter(self.model.is_public == True)
 
     def get_count_query(self):
-        return self.session.query(func.count("*")).filter(self.model.answer!=None).filter(self.model.is_public==True)
+        return self.session.query(func.count("*")).filter(self.model.answer != None).filter(
+            self.model.is_public == True)
+
 
 class AnoMePrivateQaView(AnoMeAllQaView):
     def get_query(self):
-        return self.session.query(self.model).filter(self.model.answer!=None).filter(self.model.is_public==False)
+        return self.session.query(self.model).filter(self.model.answer != None).filter(self.model.is_public == False)
 
     def get_count_query(self):
-        return self.session.query(func.count("*")).filter(self.model.answer!=None).filter(self.model.is_public==False)
-
-
+        return self.session.query(func.count("*")).filter(self.model.answer != None).filter(
+            self.model.is_public == False)

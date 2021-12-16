@@ -18,3 +18,12 @@ class QA(db.Model):
 
     def __repr__(self):
         return _default_repr(self)
+
+
+class Likes(db.Model):
+    id = db.Column(db.INTEGER, primary_key=True)
+    QA_id = db.Column(db.INTEGER, default=0)
+    likes = db.Column(db.INTEGER, default=0)
+
+    def __repr__(self):
+        return _default_repr(self)

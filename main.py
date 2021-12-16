@@ -6,7 +6,7 @@ app.secret_key = random_hex_32()
 app.debug = True
 
 from database import db
-from models import QA
+from models import QA, Likes
 
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///example_db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = True
@@ -16,7 +16,7 @@ with app.app_context():
 
 from flask_admin import Admin
 from flask_admin.menu import MenuLink
-from auth import AnoMeAdminIndexView, AnoMeAllQaView, AnoMeEmptyQaView, AnoMePublicQaView, AnoMePrivateQaView
+from auth import AnoMeView, AnoMeAdminIndexView, AnoMeAllQaView, AnoMeEmptyQaView, AnoMePublicQaView, AnoMePrivateQaView
 
 app.config["FLASK_ADMIN_SWATCH"] = "cerulean"
 admin = Admin(app, name="AnoMe", template_mode="bootstrap4", index_view=AnoMeAdminIndexView(
@@ -29,6 +29,7 @@ with app.app_context():
     admin.add_view(AnoMeEmptyQaView(QA, db.session, name="ToAnswer", endpoint="/to_answer"))
     admin.add_view(AnoMePublicQaView(QA, db.session, name="Public", endpoint="/public_answer"))
     admin.add_view(AnoMePrivateQaView(QA, db.session, name="Private", endpoint="/private_answer"))
+    admin.add_view(AnoMeView(Likes, db.session, name="Likes", endpoint="/likes"))
     admin.add_link(MenuLink(name='Back to Home', category='', url="/"))
     admin.add_link(MenuLink(name='Logout', category='', url="/logout"))
 
@@ -40,13 +41,19 @@ from hashlib import md5
 
 @app.route("/", methods=["GET"])
 def index():
-    data = QA.query.filter(QA.answer != None).filter(QA.is_public == True).order_by(QA.id.desc()).all()
+    data = QA.query.filter(QA.answer != None).filter(QA.is_public == True) \
+        .outerjoin(Likes, QA.id == Likes.QA_id).add_entity(Likes) \
+        .order_by(Likes.likes.desc(), QA.id.desc()) \
+        .all()
     return render_template("index.html", data=data)
 
 
 @app.route("/question", methods=["POST"])
 def question():
-    data = QA.query.filter(QA.answer != None).filter(QA.is_public == True).order_by(QA.id.desc()).all()
+    data = QA.query.filter(QA.answer != None).filter(QA.is_public == True) \
+        .outerjoin(Likes, QA.id == Likes.QA_id).add_entity(Likes) \
+        .order_by(Likes.likes.desc(), QA.id.desc()) \
+        .all()
     question = request.form.get("question", "")
     if not question:
         return render_template("index.html", question_error="Say something please ... Question should not empty.",
@@ -82,29 +89,68 @@ def logout():
     return redirect("/")
 
 
+@app.route("/like", methods=["GET"])
+def like():
+    qa_id = request.args.get("q", default=None)
+    operator = request.args.get("op", default="1")  # like
+    if qa_id is None:
+        return "0"
+    if operator not in "01":
+        return "0"
+    likes = Likes.query.filter(Likes.QA_id == qa_id).one_or_none()
+    if likes is None:
+        if operator == "1":
+            new_likes = Likes(QA_id=qa_id, likes=1)
+            db.session.add(new_likes)
+            db.session.commit()
+            return "1"
+        else:
+            return "0"
+    else:
+        if operator == "1":
+            likes.likes += 1
+            db.session.commit()
+        else:
+            if likes.likes > 0:
+                likes.likes -= 1
+                db.session.commit()
+        return str(likes.likes)
+
+
 @app.route("/secret", methods=["GET"])
 def show_secret():
     secret = request.args.get("s", default=None)
     if secret is None:
         return render_template("secret.html", question="")
-    data = QA.query.filter(QA.secret == secret).all()
+    data = QA.query \
+        .filter(QA.secret == secret) \
+        .outerjoin(Likes, QA.id == Likes.QA_id) \
+        .add_entity(Likes) \
+        .all()
     if len(data) == 0:
         return render_template("secret.html", secret_error="Oops, secret not found.", question="")
-    question = data[0].question
-    is_public = data[0].is_public
+    question = data[0].QA.question
+    is_public = data[0].QA.is_public
     is_public = {True: "Published", False: "Private"}.get(is_public)
-    answer = data[0].answer
+    answer = data[0].QA.answer
     is_public = "To be answered" if answer is None else is_public
     answer = "" if answer is None else answer
-    if data[0].answer_timestamp is not None:
-        timestamp_str = data[0].answer_timestamp.strftime("%Y-%m-%d %H:%M:%S")
+    if data[0].QA.answer_timestamp is not None:
+        timestamp_str = data[0].QA.answer_timestamp.strftime("%Y-%m-%d %H:%M:%S")
     else:
         timestamp_str = ""
+    if data[0].Likes is None:
+        likes = 0
+    else:
+        likes = data[0].Likes.likes
+    qa_id = data[0].QA.id
     return render_template("secret.html",
                            question=question,
                            secret=secret[:4] + "****" + secret[-4:],
                            answer=answer,
                            is_public=is_public,
+                           likes=likes,
+                           qa_id=qa_id,
                            timestamp_str=timestamp_str)
 
 
