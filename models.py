@@ -9,8 +9,8 @@ def _default_repr(class_obj):
 
 class QA(db.Model):
     id = db.Column(db.INTEGER, primary_key=True)
-    question = db.Column(db.String, nullable=False)
-    answer = db.Column(db.String, default=None)
+    question = db.Column(db.Text, nullable=False)
+    answer = db.Column(db.Text, default=None)
     question_timestamp = db.Column(db.DateTime, default=datetime.now)
     answer_timestamp = db.Column(db.DateTime, default=None)
     is_public = db.Column(db.Boolean, nullable=True, default=False)

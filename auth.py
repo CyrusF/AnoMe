@@ -40,6 +40,21 @@ class AnoMeAllQaView(AnoMeView):
 
 
 class AnoMeEmptyQaView(AnoMeAllQaView):
+    column_searchable_list = ("question", "answer", "secret")
+    column_filters = ("question", "answer", "secret")
+
+    form_widget_args = {
+        "question": {
+            "rows": 3
+        },
+        "answer": {
+            "rows": 10
+        },
+        "secret": {
+            "readonly": True
+        },
+    }
+
     def get_query(self):
         return self.session.query(self.model).filter(self.model.answer == None)
 
