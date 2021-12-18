@@ -36,10 +36,6 @@ class AnoMeView(ModelView):
 
 
 class AnoMeAllQaView(AnoMeView):
-    pass
-
-
-class AnoMeEmptyQaView(AnoMeAllQaView):
     column_searchable_list = ("question", "answer", "secret")
     column_filters = ("question", "answer", "secret")
 
@@ -55,6 +51,8 @@ class AnoMeEmptyQaView(AnoMeAllQaView):
         },
     }
 
+
+class AnoMeEmptyQaView(AnoMeAllQaView):
     def get_query(self):
         return self.session.query(self.model).filter(self.model.answer == None)
 
