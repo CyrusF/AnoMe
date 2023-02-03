@@ -4,7 +4,7 @@
 <p align="center">Just a tiny anonymous question box.</p>
 
 ## Why
-I need a anonymous question box with some 'private answer' function, and I do not trust the box run by the porviders.
+I need a anonymous question box with some 'private answer' function, and I do not trust the box run by the providers.
 
 ## How to
 1. Install requirement with `pip3 install -r requirements.txt` or any package manager you like.
