@@ -102,32 +102,39 @@ function readStored<T>(key: string, initial: T): T {
 function writeStored(key: string, value: unknown) {
   localStorage.setItem(`anome.v2026.${key}`, JSON.stringify(value));
 }
-function savedIds() {
-  return readStored<string[]>("saved", []);
+function markIds() {
+  return readStored<string[]>("marks", []);
 }
-function voteIds() {
-  return readStored<string[]>("votes", []);
+function visitorId() {
+  let id = readStored<string>("visitor", "");
+  if (!id) {
+    id = crypto.randomUUID();
+    writeStored("visitor", id);
+  }
+  return id;
+}
+async function migrateMarks() {
+  if (localStorage.getItem("anome.v2026.marks") !== null) return;
+  const votes = readStored<string[]>("votes", []);
+  const saved = readStored<string[]>("saved", []);
+  for (const id of saved.filter(id => !votes.includes(id))) {
+    try {
+      await api(`/api/questions/${encodeURIComponent(id)}/mark`, "PUT", {
+        visitor_id: visitorId(), active: true,
+      });
+    } catch (error) {
+      if (!(error instanceof ApiError && error.code === "not_public")) throw error;
+    }
+  }
+  writeStored("marks", [...new Set([...saved, ...votes])]);
 }
 function syncActions() {
-  const saved = new Set(savedIds());
-  const votes = new Set(voteIds());
-  document
-    .querySelectorAll<HTMLButtonElement>('[data-action="save"]')
-    .forEach((button) => {
-      const active = saved.has(button.dataset.id!);
-      button.setAttribute("aria-pressed", String(active));
-      button.querySelector("[data-save-label]")!.textContent = active
-        ? "已收藏"
-        : "收藏";
-    });
-  document
-    .querySelectorAll<HTMLButtonElement>('[data-action="vote"]')
-    .forEach((button) =>
-      button.setAttribute(
-        "aria-pressed",
-        String(votes.has(button.dataset.id!)),
-      ),
-    );
+  const marks = new Set(markIds());
+  document.querySelectorAll<HTMLButtonElement>('[data-action="mark"]').forEach(button => {
+    const active = marks.has(button.dataset.id!);
+    button.setAttribute("aria-pressed", String(active));
+    button.querySelector("[data-mark-label]")!.textContent = active ? "已 Mark" : "Mark";
+  });
 }
 function empty(title: string, note = "") {
   return `<div class="empty-state"><strong>${esc(title)}</strong>${note}</div>`;
@@ -169,7 +176,7 @@ async function collections() {
   const ids =
     currentPage === "my"
       ? readStored<Submission[]>("submissions", [])
-      : savedIds();
+      : markIds();
   hasMore = ids.length > listPage * 12;
   const selected = ids.slice((listPage - 1) * 12, listPage * 12);
   const results = await Promise.all(
@@ -182,15 +189,15 @@ async function collections() {
                 id: item.id,
                 receipt: item.receipt,
               });
-        if (row.status === "answered") return renderQuestion(row);
-        return `<article class="question-card"><h3 class="question-title">${esc(row.question)}</h3><div class="submission-status"><span class="status-tag ${row.status}">${row.status === "pending" ? "等待回复" : "已归档"}</span><time>${dateLabel(row.created_at)}</time></div></article>`;
+        if (row.status !== "archived") return renderQuestion(row);
+        return `<article class="question-card"><h3 class="question-title">${esc(row.question)}</h3><div class="submission-status"><span class="status-tag archived">已隐藏</span><time>${dateLabel(row.created_at)}</time></div></article>`;
       } catch (error) {
         if (
           error instanceof ApiError &&
           ["not_public", "not_found"].includes(error.code)
         ) {
           const id = typeof item === "string" ? item : item.id;
-          return `<article class="question-card"><h3 class="question-title">这个问题已不可用</h3><p class="help">问题尚未公开，或已被归档。</p>${currentPage === "saved" ? `<button type="button" class="text-button" data-action="remove-saved" data-id="${esc(id)}">移除收藏</button>` : ""}</article>`;
+          return `<article class="question-card"><h3 class="question-title">这个问题已不可用</h3><p class="help">问题已被隐藏或删除。</p>${currentPage === "saved" ? `<button type="button" class="text-button" data-action="remove-mark" data-id="${esc(id)}">移除 Mark</button>` : ""}</article>`;
         }
         throw error;
       }
@@ -200,7 +207,7 @@ async function collections() {
   $("#question-list").innerHTML = results.length
     ? results.join("")
     : empty(
-        currentPage === "my" ? "还没有留下提问" : "还没有收藏的回答",
+        currentPage === "my" ? "还没有留下提问" : "还没有 Mark 的问题",
         currentPage === "my"
           ? '<a href="/">去问一个问题</a>'
           : '<a href="/">去看看公开问答</a>',
@@ -230,14 +237,16 @@ async function saveQuestion() {
   $("#initial-submit").hidden = false;
   const message = $("#ask-message");
   message.innerHTML =
-    '问题已送达，回复后会公开。<a href="/my">查看我的提问</a>';
+    `问题已公开，等待回复。<a href="/q/${encodeURIComponent(result.id)}">查看问题</a>`;
   message.classList.add("success");
   message.hidden = false;
+  listPage = 1;
+  void publicList().catch(error => toast(errorText(error)));
 }
 function showSimilar(items: Question[]) {
   $("#initial-submit").hidden = true;
   const element = $("#similar");
-  element.innerHTML = `<section class="similar-box"><h2>这些回答，也许对你有帮助</h2>${items.map((q) => `<article class="similar-item"><h3>${esc(q.question)}</h3><div class="similar-tools"><a class="similar-link" href="/q/${encodeURIComponent(q.id)}" target="_blank" rel="noopener">查看回答 ${icons.arrow}</a>${questionActions(q)}</div></article>`).join("")}<div class="similar-footer"><p>仍然想提问？可以继续提交。</p><div class="submit-row"><button type="button" class="primary pill" data-action="continue">继续提交</button><button type="button" class="text-button" data-action="revise">返回修改</button></div></div></section>`;
+  element.innerHTML = `<section class="similar-box"><h2>这些问题，也许与你想问的相似</h2>${items.map((q) => `<article class="similar-item"><h3>${esc(q.question)}</h3><div class="similar-tools"><a class="similar-link" href="/q/${encodeURIComponent(q.id)}" target="_blank" rel="noopener">${q.status === 'pending' ? '查看问题' : '查看回答'} ${icons.arrow}</a>${questionActions(q)}</div></article>`).join("")}<div class="similar-footer"><p>仍然想提问？可以继续提交。</p><div class="submit-row"><button type="button" class="primary pill" data-action="continue">继续提交</button><button type="button" class="text-button" data-action="revise">返回修改</button></div></div></section>`;
   element.hidden = false;
   syncActions();
 }
@@ -288,7 +297,7 @@ async function submitQuestion(check: boolean) {
     showMessage("#ask-message", error);
     if (
       error instanceof ApiError &&
-      ["invalid_token", "check_required"].includes(error.code)
+      ["invalid_token", "check_required", "hidden_policy_changed", "hidden_question"].includes(error.code)
     )
       resetCheck();
   } finally {
@@ -305,8 +314,8 @@ async function submitQuestion(check: boolean) {
 
 function adminQuestion(question: Question, open: boolean): string {
   const archived = question.status === "archived";
-  return `<details class="admin-card" ${open ? "open" : ""} data-admin-question="${esc(question.id)}"><summary><span class="admin-meta">匿名提问 · ${dateLabel(question.created_at, true)}</span><span class="admin-question">${esc(question.question)}</span><span class="chevron">${icons.chevron}</span></summary>
-    <form class="reply-form" data-id="${esc(question.id)}"><label class="field-label" for="answer-${esc(question.id)}">你的回复</label><textarea id="answer-${esc(question.id)}" name="answer" rows="6" required>${esc(question.answer ?? "")}</textarea><p class="help">发布后，问题和回复将出现在公开问答中。</p><div class="form-message" role="status" hidden></div><div class="submit-row"><button type="submit" class="primary pill">${archived ? "重新发布" : question.status === "answered" ? "保存回复" : "发布回复"}</button>${archived ? "" : `<button type="button" class="text-button" data-action="archive" data-id="${esc(question.id)}">归档问题</button>`}</div></form></details>`;
+  return `<article class="admin-row"><label class="bulk-selection question-selection"><input type="checkbox" data-select-question="${esc(question.id)}">选择问题</label><details class="admin-card" ${open ? "open" : ""} data-admin-question="${esc(question.id)}"><summary><span class="admin-meta">匿名提问 · ${dateLabel(question.created_at, true)}</span><span class="admin-question">${esc(question.question)}</span><span class="chevron">${icons.chevron}</span></summary>
+    <form class="reply-form" data-id="${esc(question.id)}"><label class="field-label" for="answer-${esc(question.id)}">你的回复</label><textarea id="answer-${esc(question.id)}" name="answer" rows="6" required>${esc(question.answer ?? "")}</textarea><p class="help">${archived ? '问题已隐藏。发布回复会恢复公开。' : '问题已公开，回复会直接显示在问题下方。'}</p><div class="form-message" role="status" hidden></div><div class="submit-row admin-actions"><button type="submit" class="primary pill">${archived ? "回复并公开" : question.status === "answered" ? "保存回复" : "发布回复"}</button><button type="button" class="text-button" data-action="${archived ? 'restore' : 'hide'}" data-id="${esc(question.id)}">${archived ? '恢复公开' : '隐藏问题'}</button></div></form></details></article>`;
 }
 async function adminList() {
   const run = ++generation;
@@ -314,6 +323,9 @@ async function adminList() {
   $("#settings-panel").hidden = !settings;
   $("#admin-search-wrap").hidden = settings;
   $("#question-list").hidden = settings;
+  $("#bulk-toolbar").hidden = settings;
+  selectedQuestions.clear();
+  syncSelection();
   $("#admin-message").hidden = true;
   document
     .querySelectorAll<HTMLButtonElement>("[data-admin-tab]")
@@ -326,7 +338,7 @@ async function adminList() {
     {
       pending: "收件箱",
       answered: "已回复",
-      archived: "已归档",
+      archived: "已隐藏",
       settings: "设置",
     } as Record<string, string>
   )[adminTab];
@@ -336,7 +348,7 @@ async function adminList() {
       ? "选择一个问题，写下你的回复。"
       : adminTab === "answered"
         ? "回看已经发生的对话。"
-        : "暂时留在这里的问题。";
+        : "隐藏的问题不会公开，相似提问也会被拦截。";
   if (settings) {
     $("#pagination").hidden = true;
     const result = await api<{ daily_limit: number }>("/api/admin/settings");
@@ -362,6 +374,18 @@ async function adminList() {
             : "这里还没有问题",
       );
   updatePagination();
+  syncSelection();
+}
+const selectedQuestions = new Set<string>();
+function syncSelection() {
+  const inputs = [...document.querySelectorAll<HTMLInputElement>("[data-select-question]")];
+  inputs.forEach(input => { input.checked = selectedQuestions.has(input.dataset.selectQuestion!); });
+  const all = $<HTMLInputElement>("#select-all");
+  all.checked = inputs.length > 0 && selectedQuestions.size === inputs.length;
+  all.indeterminate = selectedQuestions.size > 0 && selectedQuestions.size < inputs.length;
+  all.disabled = inputs.length === 0;
+  $("#selection-count").textContent = `已选 ${selectedQuestions.size} 个`;
+  $<HTMLButtonElement>('[data-action="bulk-delete"]').disabled = selectedQuestions.size === 0;
 }
 function debounceSearch(selector: string, load: () => Promise<void>) {
   let timeout: ReturnType<typeof setTimeout>;
@@ -377,6 +401,7 @@ function debounceSearch(selector: string, load: () => Promise<void>) {
 }
 
 async function init() {
+  if (["home", "my", "saved", "question"].includes(currentPage ?? "")) await migrateMarks();
   if (currentPage === "home") {
     reloadList = publicList;
     $("#ask-form").addEventListener("submit", (event) => {
@@ -394,6 +419,20 @@ async function init() {
     await collections();
   } else if (currentPage === "admin") {
     reloadList = adminList;
+    document.addEventListener("change", event => {
+      const input = event.target;
+      if (!(input instanceof HTMLInputElement)) return;
+      if (input.id === "select-all") {
+        document.querySelectorAll<HTMLInputElement>("[data-select-question]").forEach(item => {
+          if (input.checked) selectedQuestions.add(item.dataset.selectQuestion!);
+          else selectedQuestions.delete(item.dataset.selectQuestion!);
+        });
+      } else if (input.dataset.selectQuestion) {
+        if (input.checked) selectedQuestions.add(input.dataset.selectQuestion);
+        else selectedQuestions.delete(input.dataset.selectQuestion);
+      } else return;
+      syncSelection();
+    });
     debounceSearch("#admin-search", adminList);
     $("#settings-form").addEventListener("submit", (event) => {
       event.preventDefault();
@@ -510,55 +549,38 @@ document.addEventListener("click", (event) => {
     }
     const id = button.dataset.id!;
     const action = button.dataset.action;
-    if (action === "save" || action === "remove-saved") {
-      const ids = savedIds();
-      const active = ids.includes(id);
-      writeStored(
-        "saved",
-        active ? ids.filter((item) => item !== id) : [id, ...ids],
-      );
-      syncActions();
-      toast(active ? "已取消收藏。" : "已收藏。");
-      if (currentPage === "saved") {
-        const total = savedIds().length;
-        listPage = Math.min(listPage, Math.max(1, Math.ceil(total / 12)));
-        await collections();
-      }
-    } else if (action === "vote") {
-      const related = [
-        ...document.querySelectorAll<HTMLButtonElement>('[data-action="vote"]'),
-      ].filter((item) => item.dataset.id === id);
-      related.forEach((item) => {
-        item.disabled = true;
+    if (action === "remove-mark") {
+      await api(`/api/questions/${encodeURIComponent(id)}/mark`, "PUT", {
+        visitor_id: visitorId(), active: false,
+      }).catch(error => {
+        if (!(error instanceof ApiError && error.code === "not_public")) throw error;
       });
+      writeStored("marks", markIds().filter(item => item !== id));
+      listPage = Math.min(listPage, Math.max(1, Math.ceil(markIds().length / 12)));
+      await collections();
+    } else if (action === "mark") {
+      const related = [...document.querySelectorAll<HTMLButtonElement>('[data-action="mark"]')]
+        .filter(item => item.dataset.id === id);
+      related.forEach(item => { item.disabled = true; });
       try {
-        let visitorId = readStored<string>("visitor", "");
-        if (!visitorId) {
-          visitorId = crypto.randomUUID();
-          writeStored("visitor", visitorId);
-        }
-        const ids = voteIds();
-        const active = !ids.includes(id);
-        const result = await api<{ votes: number }>(
-          `/api/questions/${encodeURIComponent(id)}/vote`,
-          "PUT",
-          { visitor_id: visitorId, active },
-        );
-        writeStored(
-          "votes",
-          active ? [...ids, id] : ids.filter((item) => item !== id),
-        );
-        document
-          .querySelectorAll<HTMLElement>("[data-count]")
-          .forEach((item) => {
-            if (item.dataset.count === id)
-              item.textContent = String(result.votes);
-          });
-        syncActions();
-      } finally {
-        related.forEach((item) => {
-          item.disabled = false;
+        const active = !markIds().includes(id);
+        const result = await api<{ votes: number }>(`/api/questions/${encodeURIComponent(id)}/mark`, "PUT", {
+          visitor_id: visitorId(), active,
         });
+        // Read again after the request so simultaneous marks of different questions are retained.
+        const ids = markIds();
+        writeStored("marks", active ? [id, ...ids.filter(item => item !== id)] : ids.filter(item => item !== id));
+        document.querySelectorAll<HTMLElement>("[data-count]").forEach(item => {
+          if (item.dataset.count === id) item.textContent = String(result.votes);
+        });
+        syncActions();
+        toast(active ? "已 Mark，可在 Mark 列表中查看。" : "已取消 Mark。");
+        if (currentPage === "saved") {
+          listPage = Math.min(listPage, Math.max(1, Math.ceil(markIds().length / 12)));
+          await collections();
+        }
+      } finally {
+        related.forEach(item => { item.disabled = false; });
       }
     } else if (action === "copy") {
       await navigator.clipboard.writeText(
@@ -570,13 +592,24 @@ document.addEventListener("click", (event) => {
     } else if (action === "revise") {
       resetCheck();
       $<HTMLTextAreaElement>("#question").focus();
-    } else if (action === "archive") {
+    } else if (action === "bulk-delete") {
+      const ids = [...selectedQuestions];
+      if (!ids.length || !confirm(`确认删除选中的 ${ids.length} 个问题？问题内容和回复将被清除，无法恢复。`)) return;
+      button.disabled = true;
+      try {
+        const result = await api<{ deleted: number }>("/api/admin/questions/bulk-delete", "POST", { ids });
+        toast(`已删除 ${result.deleted} 个问题。`);
+        await adminList();
+      } finally {
+        syncSelection();
+      }
+    } else if (action && ['hide', 'restore'].includes(action)) {
       button.disabled = true;
       try {
         await api(`/api/admin/questions/${encodeURIComponent(id)}`, "PATCH", {
-          action: "archive",
+          action,
         });
-        toast("问题已归档。");
+        toast(({hide:'问题已隐藏，相似提问将被拦截。',restore:'问题已恢复公开。'} as Record<string,string>)[action]);
         await adminList();
       } finally {
         button.disabled = false;

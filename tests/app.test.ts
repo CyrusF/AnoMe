@@ -64,7 +64,7 @@ function modelResponse(data: unknown) {
     usage: { total_tokens: 20 },
   });
 }
-function normalModel() {
+function normalModel(blockHidden = false) {
   return vi
     .spyOn(globalThis, "fetch")
     .mockImplementation(async (_url, options) => {
@@ -73,7 +73,7 @@ function normalModel() {
       return modelResponse(
         input.candidates
           ? {
-              ids: input.candidates
+              ids: (input.scope === 'hidden' && !blockHidden ? [] : input.candidates)
                 .slice(0, 3)
                 .map((item: { id: string }) => item.id),
             }
@@ -143,16 +143,17 @@ afterEach(async () => {
 });
 
 describe("submission and public lifecycle", () => {
-  it("checks without saving, stores once, hides until answered, and tracks with receipt", async () => {
+  it("checks without saving, publishes pending questions immediately, and tracks with receipt", async () => {
     normalModel();
     const checked = await check();
     expect(await count()).toBe(0);
     const response = await request("/api/questions", "POST", checked);
     const item = await json(response);
     expect(response.status).toBe(201);
-    expect((await request(`/api/questions/${item.id}`)).status).toBe(404);
-    expect((await request(`/q/${item.id}`)).status).toBe(404);
-    expect((await json(await request("/api/questions"))).items).toHaveLength(0);
+    expect((await request(`/api/questions/${item.id}`)).status).toBe(200);
+    expect(await (await request(`/q/${item.id}`)).text()).toContain('待回复');
+    expect((await json(await request("/api/questions"))).items[0].id).toBe(item.id);
+    expect((await json(await request('/api/questions?search=反复读'))).items[0].id).toBe(item.id);
     expect(
       (
         await request("/api/submissions/status", "POST", {
@@ -412,7 +413,7 @@ describe("AI moderation and similarity", () => {
     expect(await count()).toBe(0);
   });
 
-  it("retrieves Chinese near matches and excludes pending and archived questions", async () => {
+  it("recommends pending and answered questions without exposing hidden questions", async () => {
     const mock = normalModel();
     const publicItem = await submit("最近有什么适合反复读的书？");
     const pendingItem = await submit("你能推荐几本书吗？");
@@ -427,10 +428,10 @@ describe("AI moderation and similarity", () => {
       cookie,
     );
     const result = await check("能推荐一些值得慢慢阅读的书籍吗？");
-    expect(result.similar.map((item) => item.id)).toEqual([publicItem.id]);
+    expect(new Set(result.similar.map((item) => item.id))).toEqual(new Set([publicItem.id, pendingItem.id]));
     expect(
       result.similar.some(
-        (item) => item.id === pendingItem.id || item.id === archivedItem.id,
+        (item) => item.id === archivedItem.id,
       ),
     ).toBe(false);
     const lastCall = JSON.parse(String(mock.mock.calls.at(-1)![1]!.body));
@@ -462,7 +463,7 @@ describe("AI moderation and similarity", () => {
   });
 });
 
-describe("administrator and votes", () => {
+describe("administrator and marks", () => {
   it("requires administrator login and validates settings", async () => {
     expect((await request("/api/admin/questions")).status).toBe(401);
     expect(
@@ -493,28 +494,27 @@ describe("administrator and votes", () => {
     ).toContain("Max-Age=0");
   });
 
-  it("keeps repeated vote operations idempotent and allows cancellation", async () => {
+  it("keeps repeated Mark operations idempotent and allows cancellation", async () => {
     normalModel();
     const item = await submit();
     const visitor = crypto.randomUUID();
     const body = { visitor_id: visitor, active: true };
     expect(
-      (await request(`/api/questions/${item.id}/vote`, "PUT", body)).status,
-    ).toBe(404);
-    await publish(item.id, await login());
+      (await request(`/api/questions/${item.id}/mark`, "PUT", body)).status,
+    ).toBe(200);
     await Promise.all(
       Array.from({ length: 4 }, () =>
-        request(`/api/questions/${item.id}/vote`, "PUT", body),
+        request(`/api/questions/${item.id}/mark`, "PUT", body),
       ),
     );
     expect(
-      (await json(await request(`/api/questions/${item.id}/vote`, "PUT", body)))
+      (await json(await request(`/api/questions/${item.id}/mark`, "PUT", body)))
         .votes,
     ).toBe(1);
     expect(
       (
         await json(
-          await request(`/api/questions/${item.id}/vote`, "PUT", {
+          await request(`/api/questions/${item.id}/mark`, "PUT", {
             ...body,
             active: false,
           }),
@@ -524,13 +524,25 @@ describe("administrator and votes", () => {
     expect(
       (
         await json(
-          await request(`/api/questions/${item.id}/vote`, "PUT", {
+          await request(`/api/questions/${item.id}/mark`, "PUT", {
             ...body,
             active: false,
           }),
         )
       ).votes,
     ).toBe(0);
+  });
+
+  it("allows removing a hidden Mark but refuses adding one", async () => {
+    normalModel();
+    const item = await submit();
+    const visitor = { visitor_id: crypto.randomUUID(), active: true };
+    await request(`/api/questions/${item.id}/mark`, "PUT", visitor);
+    await request(`/api/admin/questions/${item.id}`, "PATCH", { action: "hide" }, await login());
+    expect((await request(`/api/questions/${item.id}/mark`, "PUT", visitor)).status).toBe(404);
+    const removed = await request(`/api/questions/${item.id}/mark`, "PUT", { ...visitor, active: false });
+    expect(removed.status).toBe(200);
+    expect((await json(removed)).votes).toBe(0);
   });
 
   it("keeps publication and search state consistent when publish and archive race", async () => {
@@ -562,5 +574,137 @@ describe("administrator and votes", () => {
       .bind(item.id)
       .first("count(*)");
     expect(indexed).toBe(status === "answered" ? 1 : 0);
+    expect(await env.DB.prepare('SELECT count(*) FROM hidden_question_search WHERE question_id=?').bind(item.id).first('count(*)')).toBe(status === 'archived' ? 1 : 0);
+  });
+});
+
+describe('hidden-question policy and deletion', () => {
+  it('blocks hidden duplicates and semantic matches without exposing their text or consuming quota', async () => {
+    normalModel(true);
+    const item = await submit('最近有什么值得反复读的书？');
+    const cookie = await login();
+    expect((await request(`/api/admin/questions/${item.id}`, 'PATCH', {action:'hide'}, cookie)).status).toBe(200);
+    expect((await request(`/api/questions/${item.id}`)).status).toBe(404);
+    for (const question of ['最近有什么值得反复读的书？', '能推荐适合多次阅读的书籍吗？']) {
+      const response = await request('/api/questions/check', 'POST', {question});
+      expect(response.status).toBe(422);
+      const text = await response.text();
+      expect(text).toContain('hidden_question');
+      expect(text).not.toContain(item.id);
+      expect(text).not.toContain('最近有什么值得反复读的书');
+    }
+    expect(await count()).toBe(1);
+    expect((await request(`/api/admin/questions/${item.id}`, 'PATCH', {action:'restore'}, cookie)).status).toBe(200);
+    expect((await request(`/api/questions/${item.id}`)).status).toBe(200);
+    await check('能推荐适合多次阅读的书籍吗？');
+  });
+
+  it('rechecks a previously approved submission after the administrator hides a similar question', async () => {
+    normalModel(true);
+    const item = await submit('最近有什么值得反复读的书？');
+    const checked = await check('推荐一些值得反复阅读的书籍');
+    await request(`/api/admin/questions/${item.id}`, 'PATCH', {action:'hide'}, await login());
+    const response = await request('/api/questions', 'POST', checked);
+    expect(response.status).toBe(422);
+    expect((await json(response)).error.code).toBe('hidden_question');
+    expect(await count()).toBe(1);
+  });
+
+  it('rejects a submission when hidden policy changes during its final AI check', async () => {
+    const model = normalModel();
+    const music = await submit('你会推荐什么音乐？');
+    const reading = await submit('怎样安排读书的时间？');
+    const checked = await check('有什么值得反复读的书？');
+    const cookie = await login();
+    await request(`/api/admin/questions/${music.id}`, 'PATCH', {action:'hide'}, cookie);
+    let entered!: () => void;
+    let release!: () => void;
+    const matching = new Promise<void>(resolve => { entered = resolve; });
+    const paused = new Promise<void>(resolve => { release = resolve; });
+    model.mockImplementation(async (_url, options) => {
+      const input = JSON.parse(JSON.parse(String(options?.body)).messages[1].content);
+      expect(input.scope).toBe('hidden');
+      entered(); await paused;
+      return modelResponse({ids:[]});
+    });
+    const saving = request('/api/questions', 'POST', checked);
+    await matching;
+    await request(`/api/admin/questions/${reading.id}`, 'PATCH', {action:'hide'}, cookie);
+    release();
+    const response = await saving;
+    expect(response.status).toBe(409);
+    expect((await json(response)).error.code).toBe('hidden_policy_changed');
+    expect(await count()).toBe(2);
+  });
+
+  it('clears deleted content and indexes, removes it from management, and keeps its quota charge', async () => {
+    normalModel(true);
+    const item = await submit('最近有什么值得反复读的书？');
+    const cookie = await login();
+    await request(`/api/admin/questions/${item.id}`, 'PATCH', {action:'hide'}, cookie);
+    expect((await request('/api/admin/questions/bulk-delete', 'POST', {ids:[item.id]}, cookie)).status).toBe(200);
+    const stored = await env.DB.prepare('SELECT question,answer,search_tokens,deleted_at FROM questions WHERE id=?').bind(item.id).first();
+    expect(stored?.question).toBe(''); expect(stored?.answer).toBeNull(); expect(stored?.search_tokens).toBe(''); expect(stored?.deleted_at).toBeTruthy();
+    expect((await request(`/api/questions/${item.id}`)).status).toBe(404);
+    expect((await request('/api/submissions/status', 'POST', item)).status).toBe(404);
+    expect((await json(await request('/api/admin/questions?status=archived', 'GET', undefined, cookie))).items).toHaveLength(0);
+    expect((await request(`/api/admin/questions/${item.id}`, 'PATCH', {action:'restore'}, cookie)).status).toBe(404);
+    expect((await request(`/api/admin/questions/${item.id}`, 'PATCH', {action:'publish',answer:'不能恢复'}, cookie)).status).toBe(404);
+    expect(await env.DB.prepare('SELECT count(*) FROM hidden_question_search').first('count(*)')).toBe(0);
+    await check('最近有什么值得反复读的书？');
+    await env.DB.prepare("UPDATE settings SET value='1' WHERE key='daily_limit'").run();
+    expect((await request('/api/questions/check', 'POST', {question:'新的问题'})).status).toBe(429);
+    expect(await count()).toBe(1);
+  });
+
+  it('deletes a selection atomically, clears marks and records each administrator action', async () => {
+    normalModel();
+    const first = await submit('最近有什么值得反复读的书？');
+    const second = await submit('周末可以读什么书？');
+    const kept = await submit('你喜欢什么音乐？');
+    const cookie = await login();
+    await request(`/api/questions/${first.id}/mark`, 'PUT', {visitor_id:crypto.randomUUID(), active:true});
+    await request(`/api/admin/questions/${second.id}`, 'PATCH', {action:'hide'}, cookie);
+    expect((await request('/api/admin/questions/bulk-delete', 'POST', {ids:[first.id, second.id]})).status).toBe(401);
+    for (const ids of [[], [null], Array(101).fill(first.id)]) {
+      expect((await request('/api/admin/questions/bulk-delete', 'POST', {ids}, cookie)).status).toBe(400);
+    }
+    expect((await request('/api/admin/questions/bulk-delete', 'POST', {ids:[first.id, 'missing']}, cookie)).status).toBe(404);
+    expect((await request(`/api/questions/${first.id}`)).status).toBe(200);
+    expect((await request(`/api/admin/questions/${first.id}`, 'PATCH', {action:'delete'}, cookie)).status).toBe(400);
+    const response = await request('/api/admin/questions/bulk-delete', 'POST', {ids:[first.id, second.id, first.id]}, cookie);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ok:true, deleted:2});
+    for (const id of [first.id, second.id]) {
+      expect((await request(`/api/questions/${id}`)).status).toBe(404);
+      expect(await env.DB.prepare("SELECT count(*) FROM admin_actions WHERE question_id=? AND action='delete'").bind(id).first('count(*)')).toBe(1);
+    }
+    expect(await env.DB.prepare('SELECT count(*) FROM votes').first('count(*)')).toBe(0);
+    expect((await request(`/api/questions/${kept.id}`)).status).toBe(200);
+    expect(await count()).toBe(3);
+  });
+
+  it('does not resurrect deleted questions when a reply races deletion', async () => {
+    normalModel(); const item = await submit(); const cookie = await login();
+    await Promise.all([
+      request(`/api/admin/questions/${item.id}`, 'PATCH', {action:'publish',answer:'回复'}, cookie),
+      request('/api/admin/questions/bulk-delete', 'POST', {ids:[item.id]}, cookie),
+    ]);
+    expect((await request(`/api/questions/${item.id}`)).status).toBe(404);
+    expect(await env.DB.prepare('SELECT question FROM questions WHERE id=?').bind(item.id).first('question')).toBe('');
+    expect(await env.DB.prepare('SELECT count(*) FROM question_search').first('count(*)')).toBe(0);
+    expect(await env.DB.prepare('SELECT count(*) FROM hidden_question_search').first('count(*)')).toBe(0);
+  });
+
+  it('indexes pre-existing unanswered and hidden questions during migration', async () => {
+    await reset();
+    await applyD1Migrations(env.DB, env.TEST_MIGRATIONS.slice(0,1));
+    for (const [id,status] of [['legacy-pending','pending'],['legacy-hidden','archived']]) {
+      await env.DB.prepare(`INSERT INTO questions(id,question,status,ip_hash,quota_day,receipt_hash,created_at,updated_at,request_id)
+        VALUES(?,'如何安排读书时间？',?,'ip','2026-11-02','receipt','now','now','test')`).bind(id,status).run();
+    }
+    await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
+    expect((await json(await request('/api/questions?search=读书'))).items.map(item=>item.id)).toEqual(['legacy-pending']);
+    expect(await env.DB.prepare("SELECT count(*) FROM hidden_question_search WHERE hidden_question_search MATCH '读书'").first('count(*)')).toBe(1);
   });
 });

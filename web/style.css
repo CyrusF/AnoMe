@@ -1195,3 +1195,64 @@ button[hidden],
     scroll-behavior: auto !important;
   }
 }
+
+.pending-reply {
+  margin: 20px 0;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.8;
+}
+.admin-actions {
+  flex-wrap: wrap;
+}
+.delete-button {
+  color: var(--accent) !important;
+}
+.bulk-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 24px 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+.bulk-toolbar .delete-button {
+  margin-left: auto;
+}
+.bulk-selection {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.bulk-selection input {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.admin-row {
+  margin: 20px 0;
+  background: var(--surface);
+  border-radius: 24px;
+}
+.question-selection {
+  margin: 20px 24px 0;
+  color: var(--muted);
+}
+.admin-row .admin-card {
+  margin: 0;
+  background: none;
+}
+@media (max-width: 680px) {
+  .question-footer time {
+    width: auto;
+    margin-bottom: 0;
+  }
+  .question-footer .question-actions {
+    width: 100%;
+  }
+}

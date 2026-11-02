@@ -45,8 +45,7 @@ export function questionActions(
 ): string {
   const id = escapeHtml(question.id);
   return `<div class="question-actions">
-    <button type="button" class="pill small" data-action="vote" data-id="${id}" aria-pressed="false">${icons.vote}<span>同问 <span data-count="${id}">${question.votes}</span></span></button>
-    <button type="button" class="pill small" data-action="save" data-id="${id}" aria-pressed="false">${icons.bookmark}<span data-save-label>收藏</span></button>
+    <button type="button" class="pill small" data-action="mark" data-id="${id}" aria-pressed="false">${icons.bookmark}<span data-mark-label>Mark</span><span data-count="${id}">${question.votes}</span></button>
     <button type="button" class="pill small" data-action="copy" data-id="${id}">${icons.link}<span>复制链接</span></button>
   </div>`;
 }
@@ -54,8 +53,8 @@ export function renderQuestion(question: Question, detail = false): string {
   const title = escapeHtml(question.question);
   return `<article class="question-card" data-question="${escapeHtml(question.id)}">
     <${detail ? "h1" : "h3"} class="question-title">${detail ? title : `<a href="/q/${encodeURIComponent(question.id)}">${title}</a>`}</${detail ? "h1" : "h3"}>
-    <p class="answer">${escapeHtml(question.answer ?? "")}</p>
-    <footer class="question-footer"><time datetime="${escapeHtml(question.answered_at ?? question.created_at)}">${dateLabel(question.answered_at ?? question.created_at)}</time>${questionActions(question)}</footer>
+    ${question.status === 'pending' ? '<p class="pending-reply">等待管理员回复。</p>' : `<p class="answer">${escapeHtml(question.answer ?? '')}</p>`}
+    <footer class="question-footer"><span class="status-tag ${question.status}">${question.status === 'pending' ? '待回复' : '已回复'}</span><time datetime="${escapeHtml(question.created_at)}">${dateLabel(question.created_at)}</time>${questionActions(question)}</footer>
   </article>`;
 }
 export function page(
@@ -69,7 +68,7 @@ export function page(
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='12' fill='%23ecf2f7'/%3E%3Ctext x='10' y='29' font-family='sans-serif' font-size='28' fill='%2327384a'%3EA%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="/assets/app.css"><script type="module" src="/assets/app.js"></script></head>
   <body data-page="${current}"><a class="skip-link" href="#main">跳到内容</a><header class="site-header">
-    <a class="brand" href="/">AnoMe</a>${admin ? `<span class="header-divider"></span><span class="admin-label">管理</span><nav class="admin-header-nav"><a href="/" aria-label="返回前台">${icons.external}<span>返回前台</span></a><button type="button" class="text-button" data-action="logout" aria-label="退出登录">${icons.logout}<span>退出登录</span></button></nav>` : `<nav class="public-nav" aria-label="主导航"><a href="/" ${current === "home" || current === "question" ? 'aria-current="page"' : ""}>公开问答</a><a href="/my" ${current === "my" ? 'aria-current="page"' : ""}>我的提问</a><a href="/saved" ${current === "saved" ? 'aria-current="page"' : ""}>收藏</a></nav><a class="manage-link" href="/admin">管理</a>`}
+    <a class="brand" href="/">AnoMe</a>${admin ? `<span class="header-divider"></span><span class="admin-label">管理</span><nav class="admin-header-nav"><a href="/" aria-label="返回前台">${icons.external}<span>返回前台</span></a><button type="button" class="text-button" data-action="logout" aria-label="退出登录">${icons.logout}<span>退出登录</span></button></nav>` : `<nav class="public-nav" aria-label="主导航"><a href="/" ${current === "home" || current === "question" ? 'aria-current="page"' : ""}>公开问答</a><a href="/my" ${current === "my" ? 'aria-current="page"' : ""}>我的提问</a><a href="/saved" ${current === "saved" ? 'aria-current="page"' : ""}>Mark</a></nav><a class="manage-link" href="/admin">管理</a>`}
   </header><main class="shell" id="main">${content}</main><footer class="site-footer">AnoMe</footer><div id="toast" class="toast" role="status" hidden></div></body></html>`;
 }
 export function home(limit: number): string {
@@ -81,7 +80,7 @@ export function home(limit: number): string {
       <div id="initial-submit" class="submit-row"><button type="submit" id="submit-question" class="primary pill">提交问题</button></div>
     </form></section>
     <section class="public-section" aria-labelledby="public-title"><h2 id="public-title">公开问答</h2>
-      ${searchInput("public-search", "搜索问答")}<div class="tabs sort-tabs" role="group" aria-label="问答排序"><button type="button" class="pill selected" data-sort="latest" aria-pressed="true">最新回复</button><button type="button" class="pill" data-sort="popular" aria-pressed="false">最多同问</button></div>
+      ${searchInput("public-search", "搜索问答")}<div class="tabs sort-tabs" role="group" aria-label="问答排序"><button type="button" class="pill selected" data-sort="latest" aria-pressed="true">最新提问</button><button type="button" class="pill" data-sort="popular" aria-pressed="false">最多 Mark</button></div>
       <div id="question-list" aria-live="polite"><p class="empty-state">正在加载问答…</p></div>${pagination()}
     </section>`;
 }
@@ -92,7 +91,7 @@ export function pagination(): string {
   return `<nav id="pagination" class="pagination" aria-label="分页" hidden><button type="button" class="pill" data-page-direction="-1">上一页</button><span id="page-number"></span><button type="button" class="pill" data-page-direction="1">下一页</button></nav>`;
 }
 export function collection(kind: "my" | "saved"): string {
-  return `<section class="hero compact"><h1>${kind === "my" ? "我的提问" : "收藏"}</h1><p>${kind === "my" ? "留在这里，等一个回答。" : "把想再读一遍的回答，留在这里。"}</p></section>
+  return `<section class="hero compact"><h1>${kind === "my" ? "我的提问" : "Mark"}</h1><p>${kind === "my" ? "留在这里，等一个回答。" : "把关注的问题，留在这里。"}</p></section>
     <p class="collection-note">仅保存在当前浏览器中。</p><div id="question-list" aria-live="polite"></div>${pagination()}`;
 }
 export function questionPage(question: Question): string {
@@ -103,10 +102,11 @@ export function loginPage(): string {
 }
 export function adminPage(): string {
   return `<section class="hero admin-hero"><h1 id="admin-title">收件箱</h1><p id="admin-subtitle">选择一个问题，写下你的回复。</p></section>
-  <nav class="tabs admin-tabs" aria-label="管理导航"><button class="pill selected" type="button" data-admin-tab="pending" aria-pressed="true">收件箱</button><button class="pill" type="button" data-admin-tab="answered" aria-pressed="false">已回复</button><button class="pill" type="button" data-admin-tab="archived" aria-pressed="false">已归档</button><button class="pill" type="button" data-admin-tab="settings" aria-pressed="false">设置</button></nav>
+  <nav class="tabs admin-tabs" aria-label="管理导航"><button class="pill selected" type="button" data-admin-tab="pending" aria-pressed="true">收件箱</button><button class="pill" type="button" data-admin-tab="answered" aria-pressed="false">已回复</button><button class="pill" type="button" data-admin-tab="archived" aria-pressed="false">已隐藏</button><button class="pill" type="button" data-admin-tab="settings" aria-pressed="false">设置</button></nav>
   <div id="admin-search-wrap">${searchInput("admin-search", "搜索问题")}</div><div id="admin-message" class="form-message" role="status" hidden></div>
+  <div id="bulk-toolbar" class="bulk-toolbar"><label class="bulk-selection"><input type="checkbox" id="select-all">全选本页</label><span id="selection-count">已选 0 个</span><button type="button" class="pill delete-button" data-action="bulk-delete" disabled>批量删除</button></div>
   <div id="question-list" class="admin-list" aria-live="polite"></div>${pagination()}
-  <section id="settings-panel" class="surface" hidden><form id="settings-form"><label class="field-label" for="daily-limit">每个 IP 每天的提问限额</label><input type="number" id="daily-limit" min="1" max="100" required><p class="help">每天按新加坡时间零点重置。已提交的问题不会因归档而退回额度。</p><div class="submit-row"><button type="submit" class="primary pill">保存设置</button></div></form></section>`;
+  <section id="settings-panel" class="surface" hidden><form id="settings-form"><label class="field-label" for="daily-limit">每个 IP 每天的提问限额</label><input type="number" id="daily-limit" min="1" max="100" required><p class="help">每天按新加坡时间零点重置。隐藏或删除问题不会退回当天额度。</p><div class="submit-row"><button type="submit" class="primary pill">保存设置</button></div></form></section>`;
 }
 export function messagePage(message: string, requestId?: string): string {
   return `<section class="surface message-surface"><h1>${escapeHtml(message)}</h1>${requestId ? `<p class="help">请求编号：${escapeHtml(requestId)}</p>` : ""}<a class="pill" href="/">返回首页</a></section>`;

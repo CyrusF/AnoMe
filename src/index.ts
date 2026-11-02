@@ -20,7 +20,7 @@ import {
   validQuestion,
 } from "./domain";
 import { moderate, similarIds } from "./deepseek";
-import { insertSubmission, publishQuestion, archiveQuestion } from "./sql";
+import { insertSubmission, publishQuestion, archiveQuestion, restoreQuestion, deleteQuestion } from "./sql";
 import {
   page,
   home,
@@ -147,6 +147,26 @@ async function batch(
   return results;
 }
 
+async function hiddenRevision(env: CloudflareBindings, requestId: string) {
+  const [row] = await dbRead<{ revision: number }>(env.DB, requestId, 'hidden_revision',
+    "SELECT CAST(value AS INTEGER) AS revision FROM settings WHERE key='hidden_revision'");
+  return row.revision;
+}
+
+async function assertNotHidden(env: CloudflareBindings, requestId: string, question: string, query: string) {
+  const candidates = await dbRead<{ id: string; question: string }>(env.DB, requestId, 'hidden_candidates',
+    `SELECT q.id,q.question FROM questions q WHERE q.status='archived' AND q.deleted_at IS NULL AND
+      (q.question=? OR q.id IN (SELECT question_id FROM hidden_question_search WHERE hidden_question_search MATCH ? ORDER BY rank LIMIT 30))`,
+    question, query || '""');
+  const exact = candidates.filter(candidate => candidate.question.trim() === question);
+  const matches = exact.length ? exact.map(candidate => candidate.id)
+    : await similarIds(env, requestId, question, candidates, 'hidden');
+  if (matches.length) {
+    log('hidden_question_blocked', { request_id: requestId, matched_ids: matches });
+    throw new AppError(422, 'hidden_question', '这个问题与已隐藏的问题相似，暂不接受重复提问。');
+  }
+}
+
 app.get("/", async (c) => {
   const [settings] = await dbRead<{ value: string }>(
     c.env.DB,
@@ -157,18 +177,18 @@ app.get("/", async (c) => {
   return c.html(page("匿名提问", home(Number(settings.value)), "home"));
 });
 app.get("/my", (c) => c.html(page("我的提问", collection("my"), "my")));
-app.get("/saved", (c) => c.html(page("收藏", collection("saved"), "saved")));
+app.get("/saved", (c) => c.html(page("Mark", collection("saved"), "saved")));
 app.get("/q/:id", async (c) => {
   const [question] = await dbRead<Question>(
     c.env.DB,
     c.get("requestId"),
     "public_detail",
-    `${publicSelect} WHERE q.id=? AND q.status='answered'`,
+    `${publicSelect} WHERE q.id=? AND q.status IN ('pending','answered')`,
     c.req.param("id"),
   );
   if (!question)
     return c.html(
-      page("问题暂未公开", messagePage("这个问题尚未公开，或已经被归档。")),
+      page("问题不可用", messagePage("这个问题不存在，或已经被隐藏或删除。")),
       404,
     );
   return c.html(page(question.question, questionPage(question), "question"));
@@ -191,8 +211,8 @@ app.get("/api/questions", async (c) => {
   const query = (c.req.query("search") ?? "").trim().slice(0, 200);
   const sort =
     c.req.query("sort") === "popular"
-      ? "votes DESC, q.answered_at DESC, q.id"
-      : "q.answered_at DESC, q.id";
+      ? "votes DESC, q.created_at DESC, q.id"
+      : "q.created_at DESC, q.id";
   const pageNumber = Math.max(
     1,
     Math.min(10000, Number.parseInt(c.req.query("page") ?? "1", 10) || 1),
@@ -208,7 +228,7 @@ app.get("/api/questions", async (c) => {
     c.env.DB,
     c.get("requestId"),
     "public_list",
-    `${publicSelect} WHERE q.status='answered'${search} ORDER BY ${sort} LIMIT 13 OFFSET ?`,
+    `${publicSelect} WHERE q.status IN ('pending','answered')${search} ORDER BY ${sort} LIMIT 13 OFFSET ?`,
     ...params,
     (pageNumber - 1) * 12,
   );
@@ -223,11 +243,11 @@ app.get("/api/questions/:id", async (c) => {
     c.env.DB,
     c.get("requestId"),
     "public_detail",
-    `${publicSelect} WHERE q.id=? AND q.status='answered'`,
+    `${publicSelect} WHERE q.id=? AND q.status IN ('pending','answered')`,
     c.req.param("id"),
   );
   if (!row)
-    throw new AppError(404, "not_public", "这个问题尚未公开，或已经被归档。");
+    throw new AppError(404, "not_public", "这个问题不存在，或已经被隐藏或删除。");
   return c.json(row);
 });
 
@@ -239,12 +259,14 @@ app.post("/api/questions/check", async (c) => {
   if (current.used >= current.daily_limit) throw quotaError();
   const terms = await moderate(c.env, c.get("requestId"), question);
   const query = matchQuery([...terms, question].join(" "));
+  const revision = await hiddenRevision(c.env, c.get('requestId'));
+  await assertNotHidden(c.env, c.get('requestId'), question, query);
   const candidates = query
     ? await dbRead<Question>(
         c.env.DB,
         c.get("requestId"),
         "similar_candidates",
-        `${publicSelect} WHERE q.status='answered' AND q.id IN
+        `${publicSelect} WHERE q.status IN ('pending','answered') AND q.id IN
       (SELECT question_id FROM question_search WHERE question_search MATCH ? ORDER BY rank LIMIT 30)`,
         query,
       )
@@ -264,6 +286,8 @@ app.post("/api/questions/check", async (c) => {
     id: checkId,
     question_hash: await digest(question),
     ip_hash: hash,
+    hidden_revision: revision,
+    search_query: query,
     exp: Date.now() + 600_000,
   });
   log("precheck_complete", {
@@ -290,7 +314,9 @@ app.post("/api/questions", async (c) => {
     token.purpose !== "submission" ||
     token.question_hash !== (await digest(question)) ||
     token.ip_hash !== hash ||
-    typeof token.id !== "string"
+    typeof token.id !== "string" ||
+    typeof token.hidden_revision !== 'number' ||
+    typeof token.search_query !== 'string'
   ) {
     throw new AppError(
       400,
@@ -308,6 +334,10 @@ app.post("/api/questions", async (c) => {
     id,
   );
   if (!existing.length) {
+    const revision = await hiddenRevision(c.env, c.get('requestId'));
+    if (token.hidden_revision !== revision) {
+      await assertNotHidden(c.env, c.get('requestId'), question, token.search_query);
+    }
     const now = new Date().toISOString();
     const inserted = await dbRead<{ id: string }>(
       c.env.DB,
@@ -321,6 +351,8 @@ app.post("/api/questions", async (c) => {
       await digest(receipt),
       now,
       c.get("requestId"),
+      searchTokens(question).join(' '),
+      revision,
     );
     if (!inserted.length) {
       const retry = await dbRead<{ id: string }>(
@@ -330,7 +362,11 @@ app.post("/api/questions", async (c) => {
         "SELECT id FROM questions WHERE id=?",
         id,
       );
-      if (!retry.length) throw quotaError();
+      if (!retry.length) {
+        const current = await quota(c.env, c.get('requestId'), hash);
+        if (current.used >= current.daily_limit) throw quotaError();
+        throw new AppError(409, 'hidden_policy_changed', '提问规则刚刚更新，请重新检查后提交。');
+      }
     }
   }
   log("submission", {
@@ -348,37 +384,37 @@ app.post("/api/submissions/status", async (c) => {
     c.env.DB,
     c.get("requestId"),
     "submission_status",
-    `${publicSelect} WHERE q.id=? AND q.receipt_hash=?`,
+    `${publicSelect} WHERE q.id=? AND q.receipt_hash=? AND q.deleted_at IS NULL`,
     body.id,
     await digest(body.receipt),
   );
   if (!row) throw new AppError(404, "not_found", "没有找到这条提问。");
   return c.json(row);
 });
-app.put("/api/questions/:id/vote", async (c) => {
+app.on("PUT", ["/api/questions/:id/mark", "/api/questions/:id/vote"], async (c) => {
   const body = await jsonBody(c.req.raw);
   if (
     typeof body.visitor_id !== "string" ||
     !/^[a-zA-Z0-9-]{16,80}$/.test(body.visitor_id) ||
     typeof body.active !== "boolean"
   ) {
-    throw new AppError(400, "invalid_vote", "同问请求无效，请刷新后重试。");
+    throw new AppError(400, "invalid_mark", "Mark 请求无效，请刷新后重试。");
   }
   const id = c.req.param("id");
   const [row] = await dbRead<{ id: string }>(
     c.env.DB,
     c.get("requestId"),
-    "vote_question",
-    `SELECT id FROM questions WHERE id=? AND status='answered'`,
+    "mark_question",
+    `SELECT id FROM questions WHERE id=? AND deleted_at IS NULL ${body.active ? "AND status IN ('pending','answered')" : ""}`,
     id,
   );
   if (!row)
-    throw new AppError(404, "not_public", "这个问题尚未公开，或已经被归档。");
-  await batch(c.env.DB, c.get("requestId"), "vote", [
+    throw new AppError(404, "not_public", "这个问题不存在，或已经被隐藏或删除。");
+  await batch(c.env.DB, c.get("requestId"), "mark", [
     body.active
       ? c.env.DB.prepare(
           `INSERT INTO votes(question_id,visitor_id,created_at) SELECT ?,?,? WHERE EXISTS
-        (SELECT 1 FROM questions WHERE id=? AND status='answered') ON CONFLICT DO NOTHING`,
+        (SELECT 1 FROM questions WHERE id=? AND status IN ('pending','answered')) ON CONFLICT DO NOTHING`,
         ).bind(id, body.visitor_id, new Date().toISOString(), id)
       : c.env.DB.prepare(
           "DELETE FROM votes WHERE question_id=? AND visitor_id=?",
@@ -387,10 +423,11 @@ app.put("/api/questions/:id/vote", async (c) => {
   const [count] = await dbRead<{ votes: number }>(
     c.env.DB,
     c.get("requestId"),
-    "vote_count",
+    "mark_count",
     "SELECT count(*) AS votes FROM votes WHERE question_id=?",
     id,
   );
+  log("mark", { request_id: c.get("requestId"), question_id: id, active: body.active, count: count.votes });
   return c.json({ votes: count.votes, active: body.active });
 });
 
@@ -441,7 +478,7 @@ app.get("/api/admin/questions", async (c) => {
     c.env.DB,
     c.get("requestId"),
     "admin_list",
-    `${publicSelect} WHERE q.status=? AND (q.question LIKE ? OR COALESCE(q.answer,'') LIKE ?)
+    `${publicSelect} WHERE q.status=? AND q.deleted_at IS NULL AND (q.question LIKE ? OR COALESCE(q.answer,'') LIKE ?)
       ORDER BY q.created_at DESC,q.id LIMIT 13 OFFSET ?`,
     status,
     `%${query}%`,
@@ -454,6 +491,26 @@ app.get("/api/admin/questions", async (c) => {
     has_more: rows.length > 12,
   });
 });
+app.post("/api/admin/questions/bulk-delete", async (c) => {
+  const body = await jsonBody(c.req.raw);
+  if (!Array.isArray(body.ids) || body.ids.length < 1 || body.ids.length > 100 ||
+      !body.ids.every((id) => typeof id === "string" && id.length > 0))
+    throw new AppError(400, "invalid_selection", "请选择 1–100 个问题。");
+  const ids = [...new Set(body.ids as string[])];
+  const rows = await dbRead<Question>(c.env.DB, c.get("requestId"), "bulk_delete_selection",
+    `${publicSelect} WHERE q.deleted_at IS NULL AND q.id IN (SELECT value FROM json_each(?))`, JSON.stringify(ids));
+  if (rows.length !== ids.length)
+    throw new AppError(404, "not_found", "部分问题已不可用，请刷新后重新选择。");
+  const now = new Date().toISOString();
+  await batch(c.env.DB, c.get("requestId"), "admin_bulk_delete", rows.flatMap((row) => [
+    c.env.DB.prepare(deleteQuestion).bind(now, row.id),
+    c.env.DB.prepare("DELETE FROM votes WHERE question_id=?").bind(row.id),
+    c.env.DB.prepare("INSERT INTO admin_actions(question_id,action,detail,request_id,created_at) VALUES (?,?,?,?,?)")
+      .bind(row.id, "delete", JSON.stringify({ previous_status: row.status, bulk: true }), c.get("requestId"), now),
+  ]));
+  log("admin_bulk_delete", { request_id: c.get("requestId"), question_ids: ids, count: ids.length });
+  return c.json({ ok: true, deleted: ids.length });
+});
 app.patch("/api/admin/questions/:id", async (c) => {
   const body = await jsonBody(c.req.raw);
   const id = c.req.param("id");
@@ -461,7 +518,7 @@ app.patch("/api/admin/questions/:id", async (c) => {
     c.env.DB,
     c.get("requestId"),
     "admin_question",
-    `${publicSelect} WHERE q.id=?`,
+    `${publicSelect} WHERE q.id=? AND q.deleted_at IS NULL`,
     id,
   );
   if (!old) throw new AppError(404, "not_found", "没有找到这个问题。");
@@ -477,23 +534,10 @@ app.patch("/api/admin/questions/:id", async (c) => {
     statements.push(
       c.env.DB.prepare(publishQuestion).bind(body.answer.trim(), now, id),
     );
-    statements.push(
-      c.env.DB.prepare("DELETE FROM question_search WHERE question_id=?").bind(
-        id,
-      ),
-    );
-    statements.push(
-      c.env.DB.prepare(
-        "INSERT INTO question_search(question_id,tokens) VALUES (?,?)",
-      ).bind(id, searchTokens(old.question).join(" ")),
-    );
-  } else if (body.action === "archive") {
+  } else if (body.action === "hide" || body.action === "archive") {
     statements.push(c.env.DB.prepare(archiveQuestion).bind(now, id));
-    statements.push(
-      c.env.DB.prepare("DELETE FROM question_search WHERE question_id=?").bind(
-        id,
-      ),
-    );
+  } else if (body.action === 'restore') {
+    statements.push(c.env.DB.prepare(restoreQuestion).bind(now, id));
   } else throw new AppError(400, "invalid_action", "操作无效。");
   statements.push(
     c.env.DB.prepare(
