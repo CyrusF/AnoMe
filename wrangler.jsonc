@@ -1,0 +1,27 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "anome-v2026",
+  "account_id": "0127be5fae003ff0433314d1be53e36b",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-02",
+  "compatibility_flags": ["nodejs_compat"],
+  "upload_source_maps": true,
+  "workers_dev": true,
+  "routes": [{ "pattern": "ask.excited.cloud", "custom_domain": true }],
+  "assets": { "directory": "./public", "binding": "ASSETS" },
+  "vars": { "DEEPSEEK_MODEL": "deepseek-flash" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "anome-v2026",
+      "database_id": "215933cd-5ac1-46ef-9e92-33bb1cf67bdd",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": { "enabled": true, "invocation_logs": false },
+    "traces": { "enabled": true, "head_sampling_rate": 1 },
+  },
+}

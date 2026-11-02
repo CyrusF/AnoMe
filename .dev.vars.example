@@ -1,0 +1,4 @@
+DEEPSEEK_API_KEY=""
+ADMIN_PASSWORD=""
+# Generate APP_SECRET once, then keep it stable.
+# APP_SECRET is added by the generation command in README.md.

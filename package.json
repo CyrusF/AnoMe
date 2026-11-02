@@ -1,0 +1,30 @@
+{
+  "name": "anome-v2026",
+  "version": "2026.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "npm run build && wrangler dev",
+    "types": "wrangler types",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "verify:state": "python3 verification/check_state.py",
+    "verify:mutations": "python3 verification/check_mutations.py",
+    "db:local": "wrangler d1 migrations apply anome-v2026 --local",
+    "db:remote": "wrangler d1 migrations apply anome-v2026 --remote",
+    "secrets": "node scripts/publish-secrets.mjs",
+    "deploy": "npm run build && wrangler deploy"
+  },
+  "dependencies": {
+    "hono": "^4.13.16"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.4.12",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1",
+    "vitest": "4.1.12",
+    "wrangler": "^4.156.1"
+  }
+}
